@@ -33,8 +33,6 @@ sed -i "s#VMESS_WSPATH#$VMESS_WSPATH#g" $TMP_DIRECTORY/config.json
 sed -i "s#VLESS_WSPATH#$VLESS_WSPATH#g" $TMP_DIRECTORY/config.json
 sed -i "s#SOCKS_USER#$SOCKS_USER#g" $TMP_DIRECTORY/config.json
 sed -i "s#SOCKS_PASS#$SOCKS_PASS#g" $TMP_DIRECTORY/config.json
-sed -i "s#10000#8300#g; s#20000#8400#g" $TMP_DIRECTORY/config.json
-sed -i "s#127.0.0.1#0.0.0.0#g" $TMP_DIRECTORY/config.json
 
 cp $TMP_DIRECTORY/config.json $HOME
 
@@ -56,11 +54,11 @@ Advanced_Settings=$(cat <<-EOF
 ProxyRequests off
 ProxyPreserveHost On
 
-ProxyPass "${VMESS_WSPATH}" "ws://services-${USER}.alwaysdata.net:8300${VMESS_WSPATH}"
-ProxyPassReverse "${VMESS_WSPATH}" "ws://services-${USER}.alwaysdata.net:8300${VMESS_WSPATH}"
+ProxyPass "${VMESS_WSPATH}" "ws://services-autosyst3m.alwaysdata.net:8300${VMESS_WSPATH}"
+ProxyPassReverse "${VMESS_WSPATH}" "ws://services-autosyst3m.alwaysdata.net:8300${VMESS_WSPATH}"
 
-ProxyPass "${VLESS_WSPATH}" "ws://services-${USER}.alwaysdata.net:8400${VLESS_WSPATH}"
-ProxyPassReverse "${VLESS_WSPATH}" "ws://services-${USER}.alwaysdata.net:8400${VLESS_WSPATH}"
+ProxyPass "${VLESS_WSPATH}" "ws://services-autosyst3m.alwaysdata.net:8400${VLESS_WSPATH}"
+ProxyPassReverse "${VLESS_WSPATH}" "ws://services-autosyst3m.alwaysdata.net:8400${VLESS_WSPATH}"
 EOF
 )
 
@@ -110,7 +108,6 @@ $QL
 <li>Сервер: <b>$URL</b></li>
 <li>Порт: <b>443</b></li>
 </ul>
-<p>Или URL: <span class="code">https://$URL/proxy.php</span></p>
 </div>
 </body>
 </html>
@@ -128,10 +125,10 @@ echo ""
 echo "SERVICE Command:"
 echo "./v2ray -config config.json"
 echo ""
-echo "Advanced Settings (вставить в панель Alwaysdata):"
+echo "Advanced Settings:"
 echo "$Advanced_Settings"
 echo ""
-echo "SwitchyOmega настройки:"
+echo "SwitchyOmega:"
 echo "  Protocol: HTTP"
 echo "  Server: $URL"
 echo "  Port: 443"
