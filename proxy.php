@@ -1,98 +1,116 @@
 <?php
-define('SOCKS_HOST', '127.0.0.1');
-define('SOCKS_PORT', 8500);
-define('SOCKS_USER', 'SOCKS_USER_PLACEHOLDER');
-define('SOCKS_PASS', 'SOCKS_PASS_PLACEHOLDER');
+// Простой PHP-HTTP-прокси без внешних зависимостей
+// Работает напрямую через fsockopen
 
+error_reporting(0);
+set_time_limit(0);
+
+// Получаем целевой URL
 if ($_SERVER['REQUEST_METHOD'] === 'CONNECT') {
-    $target = $_SERVER['REQUEST_URI'];
-    handle_connect($target);
-} else {
-    $host = $_SERVER['HTTP_HOST'] ?? '';
-    $port = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') ? 443 : 80;
-    handle_http($host, $port, $_SERVER['REQUEST_URI']);
-}
-
-function handle_connect($target) {
+    // HTTPS-проксирование
+    $target = $_SERVER['REQUEST_URI']; // host:port
     list($host, $port) = explode(':', $target);
-    $port = intval($port);
+    $port = intval($port) ?: 443;
     
-    $sock = create_socks5_connection($host, $port);
-    if (!$sock) {
+    // Подключаемся к целевому серверу напрямую
+    $remote = @fsockopen($host, $port, $errno, $errstr, 30);
+    if (!$remote) {
         header('HTTP/1.1 502 Bad Gateway');
+        echo "Cannot connect to $host:$port";
         exit;
     }
     
+    // Отправляем успешный ответ клиенту
     header('HTTP/1.1 200 Connection established');
-    header('Proxy-Agent: PHP-SOCKS5-Bridge/1.0');
+    header('Proxy-Agent: PHP-Proxy/1.0');
     ob_flush();
     flush();
     
+    // Туннелируем данные
     $local = fopen('php://input', 'r');
-    stream_set_blocking($local, false);
-    stream_set_blocking($sock, false);
+    stream_set_blocking($local, 0);
+    stream_set_blocking($remote, 0);
     
-    while (!feof($local) && !feof($sock)) {
-        if ($data = @fread($local, 8192)) @fwrite($sock, $data);
-        if ($data = @fread($sock, 8192)) { echo $data; ob_flush(); flush(); }
+    while (!feof($local) && !feof($remote)) {
+        if ($data = fread($local, 8192)) {
+            fwrite($remote, $data);
+        }
+        if ($data = fread($remote, 8192)) {
+            echo $data;
+            ob_flush();
+            flush();
+        }
         usleep(1000);
     }
-    fclose($sock);
-}
-
-function handle_http($host, $port, $url) {
-    $sock = create_socks5_connection($host, $port);
-    if (!$sock) {
+    
+    fclose($remote);
+    
+} else {
+    // HTTP-проксирование
+    $method = $_SERVER['REQUEST_METHOD'];
+    $url = $_SERVER['REQUEST_URI'];
+    
+    // Парсим URL если полный, или используем HOST
+    if (strpos($url, 'http') === 0) {
+        $parsed = parse_url($url);
+        $host = $parsed['host'];
+        $port = $parsed['port'] ?? 80;
+        $path = $parsed['path'] . (isset($parsed['query']) ? '?' . $parsed['query'] : '');
+        $scheme = $parsed['scheme'];
+    } else {
+        $host = $_SERVER['HTTP_HOST'];
+        $port = 80;
+        $path = $url;
+        $scheme = 'http';
+    }
+    
+    // Для HTTPS через обычный HTTP-прокси (не CONNECT)
+    if ($scheme === 'https') {
+        $port = 443;
+    }
+    
+    // Подключаемся к целевому серверу
+    $remote = @fsockopen($host, $port, $errno, $errstr, 30);
+    if (!$remote) {
         header('HTTP/1.1 502 Bad Gateway');
+        echo "Cannot connect to $host:$port - $errstr ($errno)";
         exit;
     }
     
-    $method = $_SERVER['REQUEST_METHOD'];
-    $request = "$method $url HTTP/1.1\r\n";
+    // Формируем HTTP-запрос
+    $request = "$method $path HTTP/1.1\r\n";
     
-    $skip = ['host', 'connection', 'proxy-connection', 'content-length'];
+    // Копируем заголовки
+    $skip_headers = ['host', 'connection', 'proxy-connection', 'content-length', 'proxy-authorization'];
     foreach ($_SERVER as $key => $value) {
         if (strpos($key, 'HTTP_') === 0) {
-            $header = str_replace('_', '-', substr($key, 5));
-            if (!in_array(strtolower($header), $skip)) {
-                $request .= "$header: $value\r\n";
+            $header_name = str_replace('_', '-', substr($key, 5));
+            if (!in_array(strtolower($header_name), $skip_headers)) {
+                $request .= "$header_name: $value\r\n";
             }
         }
     }
-    $request .= "Host: $host\r\nConnection: close\r\n";
     
+    $request .= "Host: $host\r\n";
+    $request .= "Connection: close\r\n";
+    
+    // Добавляем тело для POST/PUT
     $body = file_get_contents('php://input');
-    if ($body) $request .= "Content-Length: " . strlen($body) . "\r\n";
-    $request .= "\r\n$body";
+    if ($body) {
+        $request .= "Content-Length: " . strlen($body) . "\r\n";
+    }
+    $request .= "\r\n";
+    $request .= $body;
     
-    fwrite($sock, $request);
-    while (!feof($sock)) { echo fread($sock, 8192); flush(); }
-    fclose($sock);
-}
-
-function create_socks5_connection($target_host, $target_port) {
-    $sock = @fsockopen(SOCKS_HOST, SOCKS_PORT, $errno, $errstr, 10);
-    if (!$sock) return false;
+    // Отправляем запрос
+    fwrite($remote, $request);
     
-    fwrite($sock, "\x05\x02\x00\x02");
-    $resp = fread($sock, 2);
-    if (strlen($resp) < 2) { fclose($sock); return false; }
+    // Читаем ответ и отправляем клиенту
+    while (!feof($remote)) {
+        echo fread($remote, 8192);
+        flush();
+    }
     
-    $auth_method = ord($resp[1]);
-    if ($auth_method == 0x02) {
-        $user = SOCKS_USER;
-        $pass = SOCKS_PASS;
-        $auth = "\x01" . chr(strlen($user)) . $user . chr(strlen($pass)) . $pass;
-        fwrite($sock, $auth);
-        $auth_resp = fread($sock, 2);
-        if (strlen($auth_resp) < 2 || ord($auth_resp[1]) != 0x00) { fclose($sock); return false; }
-    } elseif ($auth_method != 0x00) { fclose($sock); return false; }
-    
-    $req = "\x05\x01\x00\x03" . chr(strlen($target_host)) . $target_host . pack('n', $target_port);
-    fwrite($sock, $req);
-    $resp = fread($sock, 10);
-    if (strlen($resp) < 10 || ord($resp[1]) != 0x00) { fclose($sock); return false; }
-    
-    return $sock;
+    fclose($remote);
 }
 ?>
